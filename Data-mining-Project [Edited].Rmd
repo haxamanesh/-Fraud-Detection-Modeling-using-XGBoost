@@ -1,0 +1,438 @@
+---
+title: "DataMining-Project"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-07-31"
+---
+
+## R Markdown
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+suppressWarnings({ 
+  library(readxl)
+})
+```
+
+```{r}
+suppressWarnings({
+  df <- read_excel("khesarat_badaneh.xlsx")
+  })
+```
+
+```{r}
+summary(df)
+```
+
+```{r}
+df$`مشکوک به تقلب` <- ifelse(!is.na(df$`مشکوک به تقلب`),1,0)
+```
+
+```{r}
+table(df$`مشکوک به تقلب`)
+str(df$`مشکوک به تقلب`)
+```
+
+```{r}
+dim(df)
+```
+
+```{r}
+suppressWarnings({
+  library(dplyr)
+})
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+date_columns <- c("تاریخ انقضاء بیمه نامه","تاریخ شروع بیمه نامه"
+                        ,"زمان ثبت","تاريخ صدور بيمه نامه","تاریخ تغییر وضعیت"
+                        ,"تاریخ تشکیل پرونده"
+                        ,"تاريخ صدور گواهينامه"
+                        ,"تاریخ حادثه","تاریخ اعلام خسارت"
+                        )
+df <- df %>%
+  mutate(across(all_of(date_columns), ~ as.Date(.x, format = "%Y/%m/%d")))
+```
+
+```{r}
+numeric_columns <- c(
+  "ردیف", "کد رایانه", "شماره پرونده", 
+  "شماره سریال کروکی", "مبلغ بازیافت شده", "مبلع خسارت پرداخت شده", "مبلع کارشناسی پرداخت شده"
+)
+df <- df %>%
+  mutate(across(all_of(numeric_columns), as.numeric))
+```
+
+### Remove Columns Which Contain Unusable Information
+
+```{r}
+df <- df[, !names(df) %in% c("کارشناس پرونده","شماره بیمه نامه", "کد رایانه","ردیف","شماره پرونده","زمان ثبت","شماره قرارداد")]
+```
+
+### Detecting Duplicate Values
+```{r}
+df_clean <- df[!duplicated(df),]
+dim(df_clean)
+```
+
+```{r}
+head(df_clean)
+
+```
+
+### Detecting Missing Values
+
+```{r}
+calculate_missing <- function(dataframe){
+  y <- c()
+  x <- c()
+  n <- c()
+  for (i in 1:ncol(dataframe)){
+    n[i] <- sum(is.na(dataframe[,i]))
+    if (n[i] != 0 & (n[i]/nrow(dataframe))>0.75){
+      cat("the",i,"th column with missinig values percentages > 0.75",names(dataframe[,i]),"\n")
+      cat("number of the ",i,"th column missinig values:",n[i], "\n")
+      x <- c(x,i)
+    }else if (n[i] != 0 & (n[i]/nrow(dataframe) < 0.75)){
+      y <- c(y,i)
+    }
+  
+  }
+  result <- list(morethan_0.75 = x, lessthan_0.75 = y)
+  return(result)
+}
+```
+
+```{r}
+m <- calculate_missing(df)
+m
+```
+
+### Drop Features With More Than 75% Missing Values
+```{r}
+df_clean <- df[,-(m$morethan)]
+head(df_clean)
+```
+
+```{r}
+n <- calculate_missing(df_clean)
+n
+```
+
+```{r}
+str(df_clean[,n$lessthan])
+```
+
+### Impute Missing Value
+```{r}
+head(df_clean)
+
+```
+
+```{r}
+numeric_columns_to_impute_df_clean <- c(49,42,48,47)
+for (col in numeric_columns_to_impute_df_clean){
+  df_clean[is.na(df_clean[,col]),col] <- mean(!is.na((df_clean[,col])), na.rm = TRUE)
+  cat("number of missing values of col",names(df_clean[,col]),"after imputing:",sum(is.na(df_clean[,col])),"\n")
+}
+
+```
+
+```{r}
+
+categorical_columns_to_impute_df_clean <- c(7,12,13,17,19,46)
+
+
+get_mode <- function(v) {
+  uniq_v <- unique(v)
+  uniq_v[which.max(tabulate(match(v, uniq_v)))]
+}
+for (col_index in categorical_columns_to_impute_df_clean) {
+  col_name <- names(df_clean)[col_index]
+  mode_value <- get_mode(na.omit(df_clean[[col_name]]))
+  df_clean[[col_name]][is.na(df_clean[[col_name]])] <- mode_value
+}
+```
+
+```{r}
+fixed_value <- as.POSIXct("2024-01-01 00:00:00", format="%Y-%m-%d %H:%M:%S")
+for (col in date_columns) {
+  if (col %in% colnames(df_clean)) {
+    df_clean[[col]][is.na(df_clean[[col]])] <- fixed_value
+  } else {
+    warning(paste("ستون", col, "در دیتافریم موجود نیست."))
+  }
+}
+
+```
+
+```{r}
+for (col in 1:ncol(df_clean)){
+  cat("number of missing values of col",names(df_clean[,col]),"after imputing:",sum(is.na(df_clean[,col])),"\n")
+}
+```
+
+```{r}
+head(df_clean)
+```
+
+### Encoded Character Columns
+
+```{r}
+categorical_columns <- c("آخرین شماره الحاقیه بیمه نامه
+","شماره بیمه نامه", "مشکوک به تقلب", "واحد تشکیل دهنده پرونده", 
+  "کارشناس پرونده", "خسارت خارج از مرز است ؟", "محل حادثه", 
+  "نشاني دقيق محل حادثه", "علت حادثه", "نوع حادثه", "آيا تخريب صورت گرفته است ؟","گزارش", 
+  "مقصر حادثه", "واحد تشکیل دهنده پرونده", "معرف بیمه نامه", "واحد صدور بیمه نامه", 
+  "شماره قرارداد", "رشته", "وضعيت آخرين حواله"
+)
+df_clean <- df_clean %>%
+  mutate(across(where(is.character), as.factor))
+df_clean$`آخرین شماره الحاقیه بیمه نامه` <- as.factor(df_clean$`آخرین شماره الحاقیه بیمه نامه`)
+```
+
+```{r}
+head(df_clean)
+```
+
+### Removing columns that have only one unique value(one level)
+
+```{r}
+single_level_factors <- sapply(df_clean, function(x) if (is.factor(x)) length(levels(x)) == 1 else FALSE)
+df_clean <- df_clean[, !single_level_factors]
+```
+
+### Remove DateTime columns
+
+```{r}
+datetime_columns <- c("تاریخ انقضاء بیمه نامه","تاریخ شروع بیمه نامه"
+                        ,"تاريخ صدور بيمه نامه","تاریخ تغییر وضعیت"
+                        ,"تاریخ تشکیل پرونده"
+                        ,"تاريخ صدور گواهينامه"
+                        ,"تاریخ حادثه","تاریخ اعلام خسارت","ساعت حادثه"
+                        )
+df_clean <- df_clean[, !names(df_clean) %in% datetime_columns]
+
+```
+
+
+```{r}
+df_clean_encoded <- df_clean
+df_clean_encoded2 <- df_clean_encoded
+
+```
+
+```{r}
+df_clean_encoded$target <- df_clean_encoded[["مشکوک به تقلب"]]
+df_clean_encoded <- df_clean_encoded[, !names(df_clean_encoded) %in% c("مشکوک به تقلب")]
+table(df_clean_encoded$target)
+df_clean_encoded$target <- as.factor(df_clean_encoded$target)
+
+```
+
+```{r}
+head(df_clean_encoded)
+```
+
+```{r}
+str(df_clean_encoded)
+```
+
+
+```{r}
+column_details <- lapply(df_clean_encoded, function(x) {
+  paste("Type:", class(x), ", Number of Levels:", if (is.factor(x)) length(levels(x)) else "N/A")
+})
+
+column_info_detailed <- data.frame(
+  Column_Name = names(column_details),
+  Column_Details = unlist(column_details),
+  stringsAsFactors = FALSE
+)
+
+print(column_info_detailed)
+
+```
+
+```{r}
+suppressWarnings({
+  library(car)
+  library(caret)
+})
+```
+### Balancing target column
+```{r}
+suppressWarnings({
+  library(smotefamily)
+})
+```
+
+```{r}
+encoding_mappings <- list()
+
+for (col in names(df_clean_encoded)) {
+  if (is.factor(df_clean_encoded[[col]])) {
+    original_levels <- levels(df_clean_encoded[[col]])
+    encoding_mappings[[col]] <- setNames(seq_along(original_levels), original_levels)
+    df_clean_encoded[[col]] <- as.numeric(df_clean_encoded[[col]])
+  }
+}
+```
+
+```{r}
+factor_columns <- sapply(df_clean_encoded, is.factor)
+original_levels <- lapply(df_clean_encoded[, factor_columns], levels)
+
+df_clean_encoded[, factor_columns] <- lapply(df_clean_encoded[, factor_columns], function(x) as.numeric(factor(x, levels = levels(x))))
+
+```
+
+
+```{r}
+smote_data <- SMOTE(df_clean_encoded[, -which(names(df_clean_encoded) == "target")], 
+                    df_clean_encoded$target, K = 5, dup_size = 1000)
+
+df_balanced <- data.frame(smote_data$data)
+df_balanced$target <- as.factor(df_balanced$class)
+df_balanced$class <- NULL
+table(df_balanced$target)
+```
+
+```
+decode_column <- function(encoded_col, original_levels) {
+  factor_levels <- names(original_levels)
+  decoded_col <- factor(encoded_col, levels = seq_along(factor_levels), labels = factor_levels)
+  return(as.character(decoded_col))
+}
+colnames(df_balanced) = names(df_clean_encoded)
+keep_as_double= c(33,34,35,36)
+df_balanced[-keep_as_double] <- lapply(df_balanced[-keep_as_double], function(x) floor(x))
+```
+
+```
+for (col in names(encoding_mappings)) {
+    df_balanced[[col]] <- decode_column(df_balanced[[col]], encoding_mappings[[col]])
+}
+
+df_balanced <- df_balanced %>%
+  mutate(across(where(is.character), as.factor))
+
+head(df_balanced)
+```
+
+```{r}
+head(df_balanced)
+table(df_balanced$target)
+```
+
+```{r}
+suppressWarnings({
+  library(randomForest)
+})
+```
+
+```{r}
+suppressWarnings({
+  library(xgboost)
+})
+```
+
+```{r}
+set.seed(123)
+df_final <- df_balanced
+df_final$target <- as.numeric(df_final$target)
+df_final$target <- ifelse(df_final$target == 2, 1, 0)
+```
+
+
+```{r}
+head(df_final)
+table(df_final$target)
+```
+
+### Splitting data into train and test
+```{r}
+train_indices <- sample(seq_len(nrow(df_final)), size = 0.8 * nrow(df_final))
+train_data <- df_final[train_indices, ]
+test_data <- df_final[-train_indices, ]
+
+
+train_x <- train_data %>% select(-target)
+train_y <- train_data$target
+test_x <- test_data %>% select(-target)
+test_y <- test_data$target
+```
+
+```{r}
+table(df_final$target)
+```
+
+### Feature Selection
+```{r}
+dtrain <- xgb.DMatrix(data = as.matrix(train_x), label = train_y)
+dtest <- xgb.DMatrix(data = as.matrix(test_x), label = test_y)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  max_depth = 2,
+  eta = 0.05,
+  nthread = 2,
+  gamma = 1,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  lambda = 10,   # L2 regularization term 
+  alpha = 10     # L1 regularization term
+)
+
+xgb_model <- xgb.train(params, dtrain, nrounds = 100, watchlist = list(val = dtest, train = dtrain), early_stopping_rounds = 10)
+
+importance_matrix <- xgb.importance(feature_names = colnames(train_x), model = xgb_model)
+print(importance_matrix)
+
+top_features <- importance_matrix[importance_matrix$Gain > 0.05, ]$Feature
+train_x_selected <- train_x %>% select(all_of(top_features))
+test_x_selected <- test_x %>% select(all_of(top_features))
+```
+### Cross-Validation
+```{r}
+cv_folds <- 5
+cv_model <- xgb.cv(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  nfold = cv_folds,
+  showsd = TRUE,
+  stratified = TRUE,
+  print_every_n = 10,
+  early_stopping_rounds = 10,
+  maximize = FALSE
+)
+
+best_nrounds <- cv_model$best_iteration
+print(best_nrounds)
+```
+
+### Implement XGBOOST on data
+```{r}
+
+dtrain_selected <- xgb.DMatrix(data = as.matrix(train_x_selected), label = train_y)
+dtest_selected <- xgb.DMatrix(data = as.matrix(test_x_selected), label = test_y)
+
+
+xgb_model_selected <- xgb.train(params, dtrain_selected, nrounds = best_nrounds, watchlist = list(val = dtest_selected, train = dtrain_selected), early_stopping_rounds = 10)
+
+preds <- predict(xgb_model_selected, dtest_selected)
+pred_labels <- ifelse(preds > 0.5, 1, 0)
+conf_matrix <- confusionMatrix(factor(pred_labels), factor(test_y))
+print(conf_matrix)
+
+```
